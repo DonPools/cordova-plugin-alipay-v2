@@ -1,23 +1,22 @@
 package cn.hhjjj.alipay;
 
-import org.apache.cordova.CordovaPlugin;
-import org.apache.cordova.CallbackContext;
+import android.annotation.SuppressLint;
+import android.os.Handler;
+import android.os.Message;
+import android.text.TextUtils;
+import android.util.Log;
+import android.widget.Toast;
 
+import com.alipay.sdk.app.AuthTask;
+import com.alipay.sdk.app.PayTask;
+
+import org.apache.cordova.CallbackContext;
+import org.apache.cordova.CordovaPlugin;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import com.alipay.sdk.app.PayTask;
-
-import android.os.Handler;
-import android.os.Message;
-import android.util.Log;
-
 import java.util.Map;
-
-import android.widget.Toast;
-import android.text.TextUtils;
-import android.annotation.SuppressLint;
 
 /**
  * This class echoes a string called from JavaScript.
@@ -25,6 +24,7 @@ import android.annotation.SuppressLint;
 public class alipay extends CordovaPlugin {
 
     private static final int SDK_PAY_FLAG = 1;
+    private static final int SDK_AUTH_FLAG = 2;
 
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
@@ -32,8 +32,40 @@ public class alipay extends CordovaPlugin {
             String orderInfo = args.getString(0);
             this.payment(orderInfo, callbackContext);
             return true;
+        } else if (action.equals("auth")) {
+            String authInfo = args.getString(0);
+            this.auth(authInfo, callbackContext);
+            return true;
         }
         return false;
+    }
+
+    private void auth(String authInfo, final CallbackContext callbackContext) {
+        // 对授权接口的调用需要异步进行。
+        cordova.getThreadPool().execute( new Runnable() {
+            @Override
+            public void run() {
+                // 构造AuthTask 对象
+                AuthTask authTask = new AuthTask(cordova.getActivity());
+                // 调用授权接口
+                // AuthTask#authV2(String info, boolean isShowLoading)，
+                // 获取授权结果。
+                Map<String, String> result = authTask.authV2(authInfo, true);
+
+                // 将授权结果以 Message 的形式传递给 App 的其它部分处理。
+                // 对授权结果的处理逻辑可以参考支付宝 SDK Demo 中的实现。
+                Message msg = new Message();
+                msg.what = SDK_AUTH_FLAG;
+                msg.obj = result;
+                mHandler.sendMessage(msg);
+
+                if (result.get("resultStatus").equals("9000")) {
+                    callbackContext.success(new JSONObject(result));
+                } else {
+                    callbackContext.error(new JSONObject(result));
+                }
+            }
+        });
     }
 
     private void payment(String orderInfo, final CallbackContext callbackContext) {
@@ -91,12 +123,22 @@ public class alipay extends CordovaPlugin {
                     }
                     break;
                 }
+                case SDK_AUTH_FLAG: {
+                    Map<String, String> authResult = (Map<String, String>) msg.obj;
+                    String resultStatus = authResult.get("resultStatus");
+                    if (resultStatus.equals("9000")) {
+                        // 该笔订单是否真实支付成功，需要依赖服务端的异步通知。
+                        Toast.makeText(cordova.getActivity(), "支付成功" + resultStatus, Toast.LENGTH_SHORT);
+                    } else {
+                        // 该笔订单真实的支付结果，需要依赖服务端的异步通知。
+                        Toast.makeText(cordova.getActivity(), "支付失败" + resultStatus, Toast.LENGTH_SHORT);
+                    }
+                }
                 default:
                     break;
             }
         }
 
-        ;
     };
 
 }
